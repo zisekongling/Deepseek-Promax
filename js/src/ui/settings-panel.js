@@ -17,7 +17,6 @@ import { utils } from '../utils.js';
 import { THEMES, getThemeColors } from '../themes.js';
 import { doExport, doImageExport } from '../features/export.js';
 import { clearPrivacyCache } from '../features/privacy-shield.js';
-import { restoreFloatingWrappers } from './menu-inject.js';
 
 let settingsModal = null;
 
@@ -1115,7 +1114,10 @@ export function hideSettings() {
     if (settingsModal) settingsModal.style.display = 'none';
     hideHelpPopup();
     // 恢复被临时隐藏的 DeepSeek 浮动菜单容器，否则下拉菜单将永久无法打开
-    try { restoreFloatingWrappers(); } catch (e) {}
+    // 使用 window 全局回调避免与 menu-inject.js 形成循环导入
+    if (typeof window._dsRestoreFloatingWrappers === 'function') {
+        try { window._dsRestoreFloatingWrappers(); } catch (e) {}
+    }
 }
 
 /**

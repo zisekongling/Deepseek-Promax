@@ -10,11 +10,13 @@ import android.os.Bundle
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.Toast
 import com.dspro.client.shared.AndroidContext
 import com.dspro.client.shared.DeepSeekConfig
@@ -30,6 +32,9 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
 
+    /** 输入法输入预览栏，键盘弹出时显示在键盘上方，镜像 DeepSeek 输入框内容 */
+    private lateinit var previewBar: IMEPreviewBar
+
     /** 文件选择请求码，用于 onActivityResult 配对 */
     private val fileChooserRequestCode = 10001
 
@@ -43,11 +48,19 @@ class MainActivity : Activity() {
         // 注入 Application Context，供 shared 模块读取 assets 中的 dspro.js
         AndroidContext.init(applicationContext)
 
-        // 沉浸式边到边布局，让 WebView 占据整个屏幕（含状态栏与导航栏区域）
+        // 开启 WebView 调试模式：允许通过 chrome://inspect 远程调试页面与注入脚本，
+        // 便于开发期排查 DeepSeek 网页与 dspro.js 注入逻辑。Release 包同样保留以便线上诊断。
+        WebView.setWebContentsDebuggingEnabled(true)
+
+        // 沉浸式全屏：同时隐藏状态栏与导航栏，通过 IMMERSIVE_STICKY 使其在用户
+        // 从屏幕边缘滑动时短暂半透明出现后自动隐藏，实现真正的全屏沉浸体验
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         )
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         window.statusBarColor = Color.TRANSPARENT
@@ -78,23 +91,112 @@ class MainActivity : Activity() {
             webViewClient = DeepSeekWebViewClient()
             webChromeClient = DeepSeekWebChromeClient()
 
-            // 监听系统窗口 insets，给 WebView 底部预留系统导航栏高度
-            // 让 DeepSeek 网页底部输入栏避开 Android 系统导航栏（手势条/虚拟按键）区域
-            // 使用 navigationBars()（API 30+）或 stableInsetBottom（API 30-）
-            // 避免 adjustResize 模式下软键盘弹出时 padding 叠加 IME 高度
-            setOnApplyWindowInsetsListener { v, insets ->
-                val bottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    insets.getInsets(WindowInsets.Type.navigationBars()).bottom
-                } else {
-                    insets.stableInsetBottom
-                }
-                v.setPadding(0, 0, 0, bottom)
-                insets
-            }
+            // 注入 JS 桥接对象，用于网页输入框内容变化时回调原生更新预览栏
+            addJavascriptInterface(IMEBridge(), "AndroidIME")
         }
 
-        setContentView(webView)
+        // 用 FrameLayout 作为根容器，WebView 填满，预览浮层叠加其上
+        val rootLayout = FrameLayout(this).apply {
+            addView(
+                webView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+        previewBar = IMEPreviewBar(this).also { it.attachTo(rootLayout) }
+
+        // 监听系统窗口 insets：
+        // - 导航栏高度作为 WebView 底部 padding（避免内容被手势条遮挡）
+        // - IME 高度驱动预览浮层定位（键盘弹出时浮层上移到键盘上方）
+        // API 30+ 使用 WindowInsets.Type 精确区分 navigationBars 与 ime；
+        // API 30- 通过 systemWindowInsetBottom 与 stableInsetBottom 差值判断 IME
+        webView.setOnApplyWindowInsetsListener { v, insets ->
+            val navBars: Int
+            val ime: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                navBars = insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+                ime = insets.getInsets(WindowInsets.Type.ime()).bottom
+            } else {
+                navBars = insets.stableInsetBottom
+                val sysBottom = insets.systemWindowInsetBottom
+                // IME 弹出时 systemWindowInsetBottom 会大于 stableInsetBottom（导航栏高度）
+                ime = if (sysBottom > navBars) sysBottom else 0
+            }
+            v.setPadding(0, 0, 0, navBars)
+            previewBar.onImeHeightChanged(ime)
+            insets
+        }
+
+        setContentView(rootLayout)
         webView.loadUrl(DeepSeekConfig.TARGET_URL)
+    }
+
+    /**
+     * JS 桥接对象，供网页通过 window.AndroidIME 回调原生。
+     *
+     * 网页端注入的监听脚本会在 DeepSeek 输入框触发 input/blur 事件时调用
+     * onInputChanged，将当前输入框内容（含输入法 composing 文本）传回原生，
+     * 原生据此更新预览浮层显示。
+     */
+    private inner class IMEBridge {
+        @JavascriptInterface
+        fun onInputChanged(text: String) {
+            runOnUiThread { previewBar.setText(text) }
+        }
+    }
+
+    companion object {
+        /**
+         * 注入到网页的输入预览监听脚本。
+         *
+         * 在 document 上以捕获阶段监听 input 与 blur 事件，兼容 textarea、input
+         * 及 contenteditable 三类输入控件；composing 过程中的 input 事件同样会被
+         * 捕获，从而实时镜像输入法正在输入的内容。通过 window.__imePreviewInstalled
+         * 标记防止重复注入。
+         */
+        private const val IME_PREVIEW_JS = """
+(function(){
+    if(window.__imePreviewInstalled) return;
+    window.__imePreviewInstalled=true;
+    function getText(t){
+        if(t.tagName==='TEXTAREA'||t.tagName==='INPUT') return t.value;
+        if(t.isContentEditable) return t.innerText||t.textContent||'';
+        return null;
+    }
+    document.addEventListener('input', function(e){
+        var t=e.target; if(!t) return;
+        var text=getText(t); if(text===null) return;
+        if(window.AndroidIME&&window.AndroidIME.onInputChanged) window.AndroidIME.onInputChanged(text);
+    }, true);
+    document.addEventListener('blur', function(e){
+        var t=e.target; if(!t) return;
+        if(getText(t)===null) return;
+        if(window.AndroidIME&&window.AndroidIME.onInputChanged) window.AndroidIME.onInputChanged('');
+    }, true);
+})();
+        """
+    }
+
+    /**
+     * 窗口获得焦点时重新应用沉浸式 flags。
+     *
+     * 系统在弹出文件选择器、权限对话框、软键盘等操作后会重置 systemUiVisibility，
+     * 因此在窗口重新获得焦点时需要再次应用，确保状态栏与导航栏始终保持隐藏。
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            )
+        }
     }
 
     /**
@@ -160,6 +262,8 @@ class MainActivity : Activity() {
             if (script.isNotEmpty()) {
                 view.evaluateJavascript(script, null)
             }
+            // 注入输入预览监听脚本，监听 DeepSeek 输入框内容变化并回调原生预览栏
+            view.evaluateJavascript(IME_PREVIEW_JS, null)
         }
     }
 

@@ -501,17 +501,25 @@ function observeSidebarChanges() {
     // 监听 popstate
     window.addEventListener('popstate', checkUrlChange);
 
-    // 监听 pushState/replaceState
-    const origPush = history.pushState;
-    const origReplace = history.replaceState;
-    history.pushState = function(...args) {
-        origPush.apply(this, args);
-        setTimeout(checkUrlChange, 100);
-    };
-    history.replaceState = function(...args) {
-        origReplace.apply(this, args);
-        setTimeout(checkUrlChange, 100);
-    };
+    // 监听 pushState/replaceState（添加保护标记防止多次覆写导致递归栈溢出）
+    if (!history.pushState._dsFolderWrapped) {
+        const origPush = history.pushState;
+        const wrappedPush = function(...args) {
+            origPush.apply(this, args);
+            setTimeout(checkUrlChange, 100);
+        };
+        wrappedPush._dsFolderWrapped = true;
+        history.pushState = wrappedPush;
+    }
+    if (!history.replaceState._dsFolderWrapped) {
+        const origReplace = history.replaceState;
+        const wrappedReplace = function(...args) {
+            origReplace.apply(this, args);
+            setTimeout(checkUrlChange, 100);
+        };
+        wrappedReplace._dsFolderWrapped = true;
+        history.replaceState = wrappedReplace;
+    }
 
     // 定期检查面板是否仍在 DOM 中（DeepSeek 可能重新渲染侧边栏）
     setInterval(() => {

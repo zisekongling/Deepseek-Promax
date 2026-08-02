@@ -237,6 +237,68 @@ def build_apk():
 
 
 # ============================================================
+# ADB 安装
+# ============================================================
+def find_adb():
+    """定位 adb 可执行文件路径。
+
+    查找顺序：
+      1. 环境变量 ANDROID_HOME / ANDROID_SDK_ROOT 下的 platform-tools/adb.exe
+      2. PATH 中的 adb（直接返回 'adb'，由系统解析，找不到时由调用方捕获异常）
+
+    返回值为命令字符串或列表首元素，供 subprocess.run 使用。
+    """
+    import os
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if sdk:
+        candidate = Path(sdk) / "platform-tools" / "adb.exe"
+        if candidate.exists():
+            return str(candidate)
+    # 回退到 PATH 中的 adb（依赖用户配置环境变量）
+    return "adb"
+
+
+def install_apk(apk_path):
+    """通过 adb 将 APK 安装到已连接的 Android 设备。
+
+    使用 -r 参数覆盖安装以保留应用数据。设备未连接或 adb 不可用时
+    仅打印警告，不中止构建流程（构建产物已生成，安装失败可手动安装）。
+    """
+    print("\n[安装] 通过 adb 安装到已连接设备...")
+    adb = find_adb()
+
+    # 先确认有设备在线，避免直接 install 时长时间等待
+    devices_cmd = [adb, "devices"]
+    print(f"  $ {' '.join(devices_cmd)}")
+    try:
+        result = subprocess.run(devices_cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        print(f"  [警告] 未找到 adb 可执行文件，请将 ANDROID_HOME 加入环境变量或将 adb 加入 PATH")
+        print(f"  可手动安装: adb install -r \"{apk_path}\"")
+        return False
+
+    # 解析 'adb devices' 输出，统计状态为 device 的设备数
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    device_lines = [ln for ln in lines if "\tdevice" in ln]
+    if not device_lines:
+        print("  [警告] 未检测到已连接的设备（请确认 USB 调试已开启并已授权）")
+        print(f"  可手动安装: adb install -r \"{apk_path}\"")
+        return False
+
+    # 执行安装：-r 覆盖安装保留数据，-d 允许降版本安装
+    install_cmd = [adb, "install", "-r", "-d", str(apk_path)]
+    print(f"  $ {' '.join(install_cmd)}")
+    install_result = subprocess.run(install_cmd)
+    if install_result.returncode == 0:
+        print("  安装成功")
+        return True
+    else:
+        print("  [警告] adb 安装失败，请查看上方输出")
+        print(f"  可手动安装: adb install -r \"{apk_path}\"")
+        return False
+
+
+# ============================================================
 # EXE 构建
 # ============================================================
 def build_exe():
@@ -324,6 +386,7 @@ def main():
     parser.add_argument("--js-only", action="store_true", help="仅构建 JS (webpack 打包)")
     parser.add_argument("--no-icons", action="store_true", help="跳过图标生成")
     parser.add_argument("--no-js", action="store_true", help="跳过 JS 构建")
+    parser.add_argument("--no-install", action="store_true", help="跳过构建后 adb 自动安装")
     args = parser.parse_args()
 
     # 无参数时进入交互式菜单
@@ -369,9 +432,10 @@ def main():
 
     # 执行构建
     artifacts = []
+    built_apk = None
     if args.apk:
-        apk = build_apk()
-        artifacts.append(("DeepSeek.apk", apk))
+        built_apk = build_apk()
+        artifacts.append(("DeepSeek.apk", built_apk))
     if args.exe:
         exe_dir = build_exe()
         artifacts.append(("DeepSeek", exe_dir))
@@ -379,6 +443,10 @@ def main():
     # 复制产物到 output
     if artifacts:
         copy_to_output(artifacts)
+
+    # APK 构建完成后自动通过 adb 安装到已连接设备（可用 --no-install 跳过）
+    if built_apk is not None and not args.no_install:
+        install_apk(built_apk)
 
     print("\n构建完成!")
 

@@ -99,8 +99,16 @@ function domReady() {
 /**
  * 主初始化函数
  * 分批启动：关键功能优先，非关键功能延迟到空闲时
+ * 包含防重入保护：使用 window 全局变量，确保跨脚本实例（油猴重复加载）不会重复初始化
  */
 async function init() {
+    // 防重入：使用 window 全局变量，跨脚本实例共享
+    if (window._dsInitStarted) {
+        console.log('[DS-Promax] init() 已执行过，跳过重复初始化');
+        return;
+    }
+    window._dsInitStarted = true;
+
     // 1. 自动跳转（document-start 阶段立即执行）
     initRedirect();
 
@@ -165,8 +173,13 @@ async function init() {
         }
     };
     window.addEventListener('popstate', checkRoute);
-    const _ps = history.pushState;
-    history.pushState = function() { const r = _ps.apply(this, arguments); checkRoute(); return r; };
+    // 覆写 pushState：添加标记防止多次覆写导致递归栈溢出
+    if (!history.pushState._dsWrapped) {
+        const _ps = history.pushState;
+        const wrapped = function() { const r = _ps.apply(this, arguments); checkRoute(); return r; };
+        wrapped._dsWrapped = true;
+        history.pushState = wrapped;
+    }
     setTimeout(() => tryReadIDB(), 2500);
 
     // 7. 监听暗色模式切换
@@ -193,7 +206,7 @@ async function init() {
         } catch (e) {}
     });
 
-    console.log('🌸 DeepSeek Promax 已激活 v3.8.0');
+    console.log('🌸 DeepSeek Promax 已激活 v4.0.0');
 }
 
 // ============================================================

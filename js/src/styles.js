@@ -82,10 +82,17 @@ let currentNarrowState = null;
 let currentImageRenderState = null;
 
 /**
- * 确保三个 <style> 元素存在（主题、窄边距、Mermaid）
- * @returns {{themeStyle:HTMLStyleElement, narrowStyle:HTMLStyleElement, mermaidStyle:HTMLStyleElement}}
+ * 确保四个 <style> 元素存在（字体、主题、窄边距、Mermaid）
+ * 字体样式独立注入，不依赖主题是否启用，确保 original 主题下自定义字体仍生效
+ * @returns {{fontStyle:HTMLStyleElement, themeStyle:HTMLStyleElement, narrowStyle:HTMLStyleElement, mermaidStyle:HTMLStyleElement}}
  */
 function ensureStyleElements() {
+    let fontStyle = document.getElementById('anime-font-style');
+    if (!fontStyle) {
+        fontStyle = document.createElement('style');
+        fontStyle.id = 'anime-font-style';
+        document.head.appendChild(fontStyle);
+    }
     let themeStyle = document.getElementById('anime-theme-style');
     if (!themeStyle) {
         themeStyle = document.createElement('style');
@@ -104,15 +111,25 @@ function ensureStyleElements() {
         mermaidStyle.id = 'anime-mermaid-style';
         document.head.appendChild(mermaidStyle);
     }
-    return { themeStyle, narrowStyle, mermaidStyle };
+    return { fontStyle, themeStyle, narrowStyle, mermaidStyle };
 }
 
 /**
- * 注入所有样式：主题 CSS + 窄边距 CSS + Mermaid CSS
+ * 注入所有样式：字体 CSS + 主题 CSS + 窄边距 CSS + Mermaid CSS
+ * 字体样式独立注入且只注入一次，不依赖主题是否启用
  * 使用缓存避免重复注入，仅在配置变化时更新。
  */
 export function injectStyles() {
-    const { themeStyle, narrowStyle, mermaidStyle } = ensureStyleElements();
+    const { fontStyle, themeStyle, narrowStyle, mermaidStyle } = ensureStyleElements();
+
+    // 字体规则独立注入（只注入一次），确保 original 主题下自定义字体也生效
+    if (!fontStyle.textContent) {
+        fontStyle.textContent = `
+            body, div, p, span, input, textarea, button, select {
+                font-family: var(--anime-custom-font, 'Inter', 'PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',sans-serif) !important;
+            }
+        `;
+    }
     const themeName = CONFIG.themeColor || 'border';
     const narrowOn = CONFIG.narrowPaddingEnabled;
     const isDark = utils.isDarkMode();
@@ -137,9 +154,6 @@ export function injectStyles() {
                     --anime-msg-bubble-bg: ${t.msgBubbleBg}; --anime-msg-bubble-border: ${t.msgBubbleBorder};
                     --anime-code-bg: ${t.codeBg}; --anime-link-color: ${t.linkColor};
                     --anime-think-bg: ${t.thinkBg}; --anime-card-bg: ${t.cardBg};
-                }
-                body, div, p, span, input, textarea, button, select {
-                    font-family: var(--anime-custom-font, 'PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',sans-serif) !important;
                 }
                 ::selection { background: ${t.primary} !important; color: #fff !important; }
                 ::-webkit-scrollbar { width: 7px !important; }

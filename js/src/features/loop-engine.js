@@ -1522,20 +1522,29 @@ export function initLoopEngine() {
     }
 
     // 监听 SPA 路由变化（防止 URL 变化时误暂停）
+    // 使用标记防止多次覆写导致递归栈溢出
     let lastHref = location.href;
     window.addEventListener('popstate', () => handleRouteChange(lastHref));
-    const _ps = history.pushState;
-    history.pushState = function() {
-        const r = _ps.apply(this, arguments);
-        setTimeout(() => handleRouteChange(lastHref), 0);
-        return r;
-    };
-    const _rs = history.replaceState;
-    history.replaceState = function() {
-        const r = _rs.apply(this, arguments);
-        setTimeout(() => handleRouteChange(lastHref), 0);
-        return r;
-    };
+    if (!history.pushState._dsLoopWrapped) {
+        const _ps = history.pushState;
+        const wrapped = function() {
+            const r = _ps.apply(this, arguments);
+            setTimeout(() => handleRouteChange(lastHref), 0);
+            return r;
+        };
+        wrapped._dsLoopWrapped = true;
+        history.pushState = wrapped;
+    }
+    if (!history.replaceState._dsLoopWrapped) {
+        const _rs = history.replaceState;
+        const wrappedRs = function() {
+            const r = _rs.apply(this, arguments);
+            setTimeout(() => handleRouteChange(lastHref), 0);
+            return r;
+        };
+        wrappedRs._dsLoopWrapped = true;
+        history.replaceState = wrappedRs;
+    }
     function handleRouteChange(prev) {
         if (location.href === prev) return;
         lastHref = location.href;

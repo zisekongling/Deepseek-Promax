@@ -55,6 +55,9 @@ export function restoreFloatingWrappers() {
     hiddenFloatingWrappers.clear();
 }
 
+// 注册全局回调，供 settings-panel.js 调用，避免循环导入
+window._dsRestoreFloatingWrappers = restoreFloatingWrappers;
+
 /**
  * 先关闭 DeepSeek 下拉菜单，再显示设置面板
  *
