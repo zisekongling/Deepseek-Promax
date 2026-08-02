@@ -4,6 +4,20 @@
 
 > **Vibe Coding** — 本项目完全通过 vibe coding 方式构建：以自然语言对话驱动 AI 生成代码、迭代功能、修复缺陷，开发者专注于意图表达与决策，由 AI 完成具体实现。
 
+## 安装
+
+### 油猴脚本（推荐）
+
+先安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展，然后点击下方链接一键安装 DeepSeek Promax：
+
+[👉 点击安装 DeepSeek Promax 油猴脚本](https://github.com/zisekongling/Deepseek-Promax/raw/refs/heads/main/script.user.js)
+
+> 链接指向仓库 `main` 分支根目录的 `script.user.js`，Tampermonkey 会识别 `// ==UserScript==` 头部并自动弹出安装确认窗口。安装后访问 [deepseek.com](https://deepseek.com) 即自动生效。
+
+### 客户端（APK / EXE）
+
+Android 与桌面客户端需从源码构建，参见下方 [构建命令](#构建命令) 章节。
+
 ## 项目结构
 
 ```
@@ -41,9 +55,9 @@
 │       ├── DeepSeek.exe
 │       └── runtime/         # JRE 运行时
 │
-├── build.py                 # 一键构建脚本（图标生成 + JS 打包 + APK/EXE 构建）
+├── build.py                 # 一键构建脚本（图标生成 + JS 打包 + APK/EXE 构建 + adb 安装）
 ├── icon.png                 # 应用图标源文件
-└── main.js                  # 早期单文件脚本（已迁移至 js/ 模块化）
+└── script.user.js           # 油猴脚本发布版（供 Tampermonkey 一键安装）
 ```
 
 ## 快速开始
