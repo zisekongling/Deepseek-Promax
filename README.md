@@ -2,6 +2,8 @@
 
 > DeepSeek 客户端多端构建工程：油猴脚本（JS）+ Android APK + Desktop EXE，三端共享同一套脚本资源。
 
+> **Vibe Coding** — 本项目完全通过 vibe coding 方式构建：以自然语言对话驱动 AI 生成代码、迭代功能、修复缺陷，开发者专注于意图表达与决策，由 AI 完成具体实现。
+
 ## 项目结构
 
 ```
@@ -116,4 +118,4 @@ python build.py
 
 ## License
 
-MIT
+GPL-3.0

@@ -9,7 +9,7 @@
     "build:debug": "webpack --mode development"
   },
   "author": "Assistant",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "devDependencies": {
     "terser-webpack-plugin": "^5.6.1",
     "webpack": "^5.91.0",
