@@ -196,6 +196,22 @@ def run_cmd(cmd, cwd=None, shell=False):
     return result.returncode == 0
 
 
+def force_rmtree(path):
+    """强制删除目录树，处理只读文件（jpackage 生成的 exe 默认为 ReadOnly）。
+
+    shutil.rmtree 遇到只读文件会抛出 PermissionError(WinError 5)，
+    此函数通过 onerror 回调先清除只读属性再重试删除。
+    """
+    import os
+    import stat
+
+    def _onerror(func, p, exc_info):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    shutil.rmtree(path, onerror=_onerror)
+
+
 # ============================================================
 # APK 构建
 # ============================================================
@@ -238,9 +254,10 @@ def build_exe():
     dest_dir = PROJECT_DIR / "build/exe"
 
     # 清理旧产物（构建产物目录，重建是正常流程）
+    # 注意：jpackage 生成的 exe 默认为 ReadOnly，必须用 force_rmtree 处理
     if dest_dir.exists():
         print(f"  清理旧产物: {dest_dir}")
-        shutil.rmtree(dest_dir)
+        force_rmtree(dest_dir)
 
     cmd = [
         str(JPACKAGE),
@@ -286,7 +303,7 @@ def copy_to_output(artifacts):
         if src_path.is_dir():
             dst = OUTPUT_DIR / name
             if dst.exists():
-                shutil.rmtree(dst)
+                force_rmtree(dst)
             shutil.copytree(src_path, dst)
             print(f"  {name}/ -> output/{name}/")
         else:
