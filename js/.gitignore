@@ -1,2 +1,12 @@
+# 依赖
 node_modules/
+
+# 构建产物
 dist/
+
+# CDP 诊断脚本
+_cdp_*.mjs
+
+# 诊断临时文件
+diagnose_before.png
+ui_dump.xml
