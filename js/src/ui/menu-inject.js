@@ -7,7 +7,17 @@
  */
 import { utils } from '../utils.js';
 import { CONFIG } from '../config.js';
+import { Platform } from '../platform/bridge.js';
 import { showSettings } from './settings-panel.js';
+
+/**
+ * i18n 翻译安全 getter
+ * window._dsI18n 可用时调用其 t() 方法，否则回退为 key 本身
+ * @param {string} k - 点分资源 key（如 'menu.scriptSettingsWithIcon'）
+ * @param {Object} [p] - 占位符参数
+ * @returns {string} 翻译后的文案；i18n 未初始化时返回 key 本身
+ */
+const t = (k, p) => (window._dsI18n ? window._dsI18n.t(k, p) : k);
 
 let mobileObserver = null;
 let menuBtnRetryTimer = null;
@@ -39,8 +49,42 @@ function isUserMenu(menu) {
 }
 
 /**
+ * 派发 Esc 键事件以关闭 DeepSeek 下拉菜单
+ * Esc 只会关闭已打开的菜单，不会 toggle 菜单按钮状态，是安全的关闭方式
+ */
+function dispatchEscapeKey() {
+    try {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+    } catch (e) {}
+}
+
+/**
+ * 手机端专用：点击菜单项后显示设置面板
+ *
+ * 与桌面端 closeDropdownThenShowSettings 的关键区别：
+ * 不强制 display:none 隐藏 .ds-floating-position-wrapper，也不阻止 click 冒泡。
+ * 让 DeepSeek 的菜单点击处理器自动关闭菜单（setOpen(false)），
+ * 这样 React 的 isOpen 状态会正确变为 false，
+ * 用户关闭设置面板后再次点击头像，toggle → isOpen=true，菜单能正常打开。
+ *
+ * 桌面端强制隐藏 wrapper 会导致 React isOpen 仍为 true，
+ * 恢复 display 后菜单"假打开"，用户点击头像实际是"关闭"操作，菜单无反应。
+ */
+function mobileShowSettingsAfterMenuClose() {
+    // 兜底：派发 Esc 键，确保即使 DeepSeek 未处理 click 也能关闭菜单
+    dispatchEscapeKey();
+    // 延迟显示设置面板，等待 DeepSeek 关闭菜单的动画/状态更新
+    setTimeout(() => {
+        showSettings();
+    }, 300);
+}
+
+/**
  * 恢复所有被临时隐藏的浮动菜单容器的 display
  * 应在隐藏设置面板后调用，避免下拉菜单永久无法打开
+ * 恢复后再触发一次 Esc 键，确保菜单状态同步为"已关闭"，防止 toggle 状态紊乱
  */
 export function restoreFloatingWrappers() {
     hiddenFloatingWrappers.forEach((originalDisplay, wrapper) => {
@@ -53,6 +97,9 @@ export function restoreFloatingWrappers() {
         }
     });
     hiddenFloatingWrappers.clear();
+    // 恢复 wrapper 后触发 Esc，确保如果 DeepSeek 菜单状态仍为"已打开"时被同步关闭
+    // 这样下次点击菜单按钮时，状态是"已关闭"，toggle → "已打开"，菜单能正常打开
+    dispatchEscapeKey();
 }
 
 // 注册全局回调，供 settings-panel.js 调用，避免循环导入
@@ -62,32 +109,24 @@ window._dsRestoreFloatingWrappers = restoreFloatingWrappers;
  * 先关闭 DeepSeek 下拉菜单，再显示设置面板
  *
  * 关键：关闭操作在 showSettings() 之前执行，
- * 此时设置面板尚未显示，click 事件不会影响它。
+ * 此时设置面板尚未显示，事件不会影响它。
+ *
+ * 注意：不使用 body.click()，因为 click 事件冒泡到 document 后，
+ * 可能被 DeepSeek 菜单按钮的 toggle 委托监听器误捕获，
+ * 导致按钮状态反转（按钮认为"已打开"但 wrapper 被 display:none 隐藏），
+ * 用户关闭设置面板后点击菜单按钮实际是"关闭"操作，菜单无法打开。
+ * 改用 Esc 键 + mousedown，这两个事件只会触发 onClickOutside 关闭菜单，不会 toggle 按钮。
  */
 function closeDropdownThenShowSettings() {
-    // 关闭 DeepSeek 下拉菜单
-    // 注意：不使用 btn.click()，因为它是 toggle（切换）行为——
-    // 若点击菜单项时 DeepSeek 已自动关闭下拉菜单，btn.click() 会重新打开它，
-    // 再被 body.click() 关闭，导致 DeepSeek 内部状态紊乱，
-    // 第二次点击菜单按钮时将无法正常打开下拉菜单。
-    // 改用 Esc 键 + mousedown/click 外部事件，这些操作只会关闭菜单，不会 toggle。
-
-    // 方法1：派发 Esc 键关闭下拉菜单（dropdown 组件通常支持 Esc 关闭）
-    try {
-        document.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
-        }));
-    } catch (e) {}
+    // 方法1：派发 Esc 键关闭下拉菜单（dropdown 组件通常支持 Esc 关闭，不会 toggle 按钮）
+    dispatchEscapeKey();
 
     // 方法2：派发 mousedown 到 body，触发 onClickOutside 检测（多数库监听 mousedown 而非 click）
     try {
         document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     } catch (e) {}
 
-    // 方法3：派发 click 到 body 触发 DeepSeek 的外部点击检测（兜底）
-    try { document.body.click(); } catch (e) {}
-
-    // 方法4：隐藏手机端浮动菜单容器（兜底，使用 display:none 避免破坏 React DOM）
+    // 方法3：隐藏手机端浮动菜单容器（兜底，使用 display:none 避免破坏 React DOM）
     // 重要：保存原始 display 值，后续在隐藏设置面板时恢复，否则下拉菜单永久无法打开
     document.querySelectorAll('.ds-floating-position-wrapper').forEach(w => {
         if (!w.closest('#ds-settings-modal') && !hiddenFloatingWrappers.has(w)) {
@@ -100,6 +139,30 @@ function closeDropdownThenShowSettings() {
     setTimeout(() => {
         showSettings();
     }, 200);
+}
+
+/**
+ * 打开 DeepSeek++ 侧边栏（仅 Electron 桌面端）
+ * 通过 IPC 通知主进程打开扩展的 sidepanel.html
+ */
+function openSidepanel() {
+    if (!Platform.isElectron) return;
+    try {
+        const invoke = (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function')
+            ? window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__)
+            : null;
+        if (invoke) {
+            invoke('open_sidepanel').catch(() => {
+                console.warn('[menu-inject] open_sidepanel IPC 失败，尝试备用方案');
+                // 备用方案：通过 chrome.runtime 发送消息到扩展
+                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+                    chrome.runtime.sendMessage({ type: 'OPEN_SIDEPANEL' }).catch(() => {});
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('[menu-inject] 打开侧边栏失败:', e);
+    }
 }
 
 /**
@@ -118,7 +181,7 @@ function addMenuItemToMenu(menu) {
     const item = document.createElement('div');
     item.id = 'ds-settings-menu-item';
     item.style.cssText = `padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;color:${isDark?'#e8d5dd':'#4a3040'};font-size:14px;border-radius:4px;`;
-    item.innerHTML = '⚙️ 脚本设置';
+    item.innerHTML = t('menu.scriptSettingsWithIcon');
     item.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -126,6 +189,27 @@ function addMenuItemToMenu(menu) {
         closeDropdownThenShowSettings();
     });
     menu.appendChild(item);
+
+    // 电子端：添加"打开侧边栏"菜单项
+    if (Platform.isElectron) {
+        const sidebarItem = document.createElement('div');
+        sidebarItem.id = 'ds-sidebar-menu-item';
+        sidebarItem.style.cssText = `padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;color:${isDark?'#e8d5dd':'#4a3040'};font-size:14px;border-radius:4px;`;
+        sidebarItem.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg> 打开侧边栏';
+        sidebarItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            openSidepanel();
+            // 关闭下拉菜单
+            dispatchEscapeKey();
+        });
+        menu.appendChild(sidebarItem);
+
+        // 扩展菜单高度以适应新增项
+        if (menu.style.maxHeight) {
+            menu.style.maxHeight = '500px';
+        }
+    }
 }
 
 /**
@@ -164,19 +248,51 @@ function addMobileMenuItem(menu) {
     // 标签
     const label = document.createElement('div');
     label.className = 'ds-dropdown-menu-option__label';
-    label.textContent = '脚本设置';
+    label.textContent = t('menu.scriptSettings');
 
     item.appendChild(iconWrap);
     item.appendChild(label);
 
     item.addEventListener('click', (e) => {
-        e.stopPropagation();
+        // 仅阻止默认行为，不阻止冒泡：
+        // 让 click 事件冒泡到 DeepSeek 的菜单容器，触发其自身的"点击菜单项 → 关闭菜单"逻辑
+        // 这样 React 的 isOpen 状态会正确变为 false，避免下次点击头像无法打开菜单
         e.preventDefault();
-        // 先关闭下拉菜单，再显示设置
-        closeDropdownThenShowSettings();
+        mobileShowSettingsAfterMenuClose();
     });
 
     menu.appendChild(item);
+
+    // 电子端：添加"打开侧边栏"菜单项
+    if (Platform.isElectron) {
+        const sidebarItem = document.createElement('div');
+        sidebarItem.id = 'ds-sidebar-mobile-item';
+        sidebarItem.className = 'ds-dropdown-menu-option ds-dropdown-menu-option--none';
+        sidebarItem.setAttribute('role', 'menuitem');
+        sidebarItem.style.cssText = 'cursor:pointer;';
+
+        const sidebarIconWrap = document.createElement('div');
+        sidebarIconWrap.className = 'ds-dropdown-menu-option__icon';
+        sidebarIconWrap.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>';
+
+        const sidebarLabel = document.createElement('div');
+        sidebarLabel.className = 'ds-dropdown-menu-option__label';
+        sidebarLabel.textContent = '打开侧边栏';
+
+        sidebarItem.appendChild(sidebarIconWrap);
+        sidebarItem.appendChild(sidebarLabel);
+
+        sidebarItem.addEventListener('click', (e) => {
+            e.preventDefault();
+            openSidepanel();
+            dispatchEscapeKey();
+        });
+
+        menu.appendChild(sidebarItem);
+
+        // 扩展移动端菜单高度
+        menu.style.maxHeight = '600px';
+    }
 }
 
 /**

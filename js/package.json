@@ -6,7 +6,9 @@
     "watch": "webpack --mode development --watch",
     "dev": "webpack --mode development",
     "build": "webpack --mode production",
-    "build:debug": "webpack --mode development"
+    "build:debug": "webpack --mode development",
+    "sync": "node scripts/sync-resources.js",
+    "build:android": "webpack --mode production && node scripts/sync-resources.js"
   },
   "author": "zisekongling",
   "license": "GPL-3.0",

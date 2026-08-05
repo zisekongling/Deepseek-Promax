@@ -12,8 +12,8 @@ android {
         applicationId = "com.dspro.client.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 5
+        versionName = "3.5.0"
     }
 
     // Release 签名配置，使用项目内 keystore 对 APK 进行签名

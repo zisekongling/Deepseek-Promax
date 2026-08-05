@@ -1,6 +1,6 @@
 # DeepSeek Promax
 
-> DeepSeek 客户端多端构建工程：油猴脚本（JS）+ Android APK + Desktop EXE，三端共享同一套脚本资源。
+> DeepSeek 客户端多端构建工程：油猴脚本（JS）+ Android APK + Electron Desktop EXE，三端共享同一套脚本资源。
 
 > **Vibe Coding** — 本项目完全通过 vibe coding 方式构建：以自然语言对话驱动 AI 生成代码、迭代功能、修复缺陷，开发者专注于意图表达与决策，由 AI 完成具体实现。
 
@@ -57,14 +57,20 @@ Android 与桌面客户端需从源码构建，参见下方 [构建命令](#构�
 │   ├── webpack.config.js   # 构建配置（双环境双构建）
 │   └── package.json
 │
-├── DeepSeekClient/          # Kotlin 多平台客户端（Android + Desktop）
+├── DeepSeekClient/          # Kotlin 多平台客户端（Android + 共享脚本）
 │   ├── androidApp/          # Android WebView 容器模块
-│   ├── desktopApp/          # JavaFX WebView 桌面模块
 │   ├── shared/              # KMP 共享模块（存放 dspro.js 资源）
 │   ├── build-resources/     # 图标资源
 │   ├── gradle/              # Gradle Wrapper 与版本目录
 │   ├── build.gradle.kts     # 根构建脚本
 │   └── settings.gradle.kts  # 项目设置
+│
+├── deepseek-electron/       # Electron 桌面客户端（Windows EXE）
+│   ├── extension/           # 内嵌浏览器扩展（sidepanel、pyodide、技能仓库等）
+│   ├── resources/           # JS 产物与图标（由 build.py 同步）
+│   ├── main.js              # Electron 主进程
+│   ├── preload.js           # 预加载脚本
+│   └── package.json         # electron-builder 配置（输出 dist3/）
 │
 ├── output/                  # 构建产物输出（被 .gitignore 忽略）
 ├── build.py                 # 一键构建脚本（图标生成 + JS 打包 + APK/EXE 构建 + adb 安装）
@@ -76,10 +82,10 @@ Android 与桌面客户端需从源码构建，参见下方 [构建命令](#构�
 
 ### 环境要求
 
-- **Node.js** >= 18（用于 JS 打包）
+- **Node.js** >= 18（用于 JS 打包与 Electron 构建）
 - **Python** >= 3.10 + Pillow（用于图标生成与构建脚本）
-- **JDK** 21 + JavaFX（用于 Desktop EXE 构建）
 - **Android SDK** + Gradle 9.2（用于 APK 构建）
+- **Electron** >= 35（用于 Desktop EXE 构建，由 npm 自动安装）
 
 ### 构建命令
 
@@ -93,7 +99,7 @@ python build.py --icons-only
 # 3. 构建 APK（Android 签名 Release）
 python build.py --apk
 
-# 4. 构建 EXE（Desktop jpackage）
+# 4. 构建 EXE（Electron desktop，便携文件夹）
 python build.py --exe
 
 # 5. 构建全部
@@ -168,22 +174,33 @@ python build.py
 
 ## 模块化油猴脚本
 
-`js/` 目录是 DeepSeek Promax 油猴脚本的核心开发目录，使用 webpack 进行模块化打包，采用"单源码双构建"策略：
+`js/` 目录是 DeepSeek Promax 油猴脚本的核心开发目录，使用 webpack 进行模块化打包，采用"单源码多产物"策略：
 
 | 产物 | 入口 | 用途 |
 |------|------|------|
 | `dist/dspro.user.js` | `src/index.js` | 篡改猴版，含 `==UserScript==` 头部 |
 | `dist/dspro.js` | `src/index.js` | WebView 主脚本，无头部 |
 | `dist/dspro.early-boot.js` | `src/early-boot.js` | WebView 早注入 stub |
+| `dist/dspro.desktop.js` | `src/desktop-index.js` | Electron 桌面端专属脚本 |
+| `dist/dspro.mobile.js` | `src/mobile-index.js` | 移动端专属脚本 |
 
 ## 客户端构建
 
-`DeepSeekClient/` 使用 Kotlin 多平台 + Gradle 构建：
+### Android APK（`DeepSeekClient/`）
+
+使用 Kotlin 多平台 + Gradle 构建：
 
 - **Android APK**：原生 WebView 容器，自动加载脚本
-- **Desktop EXE**：JavaFX WebView 容器，使用 jpackage 打包为原生应用
+- **shared 模块**：统一存放 `dspro.js`、`dspro.early-boot.js`、`dspro.mobile.js` 资源
 
-`shared` 模块统一存放 `dspro.js` 资源，由两端共享。
+### Electron Desktop EXE（`deepseek-electron/`）
+
+使用 Electron + electron-builder 构建：
+
+- **Electron 主进程**：`main.js` 创建窗口并加载 DeepSeek 网页
+- **内嵌扩展**：`extension/` 目录集成 sidepanel、pyodide、技能仓库、MCP 控制器等完整能力
+- **资源同步**：`resources/` 目录由 `build.py` 自动同步 JS 产物与图标
+- **构建产物**：`dist3/win-unpacked/` 便携文件夹（含 DeepSeek.exe）
 
 ## 开发约定
 

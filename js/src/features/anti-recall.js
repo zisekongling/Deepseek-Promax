@@ -7,6 +7,10 @@
  */
 import { CONFIG } from '../config.js';
 import { Store, handleBiz, findBizPayload } from './data-store.js';
+import { observeXhrStream } from '../utils/fetch-hub.js';
+import { isAgentContinuationPrompt } from '../utils/agent-marker.js';
+import { applyPromptAugmentation } from '../utils/prompt-augmentation.js';
+import { stripToolCallsFromHistory } from './history-cleanup.js';
 
 const TEMPLATE_RESPONSE = "TEMPLATE_RESPONSE";
 const CONTENT_FILTER = "CONTENT_FILTER";
@@ -202,6 +206,15 @@ function onHistoryMessageResp(req, res) {
     // 数据捕获：将对话数据保存到 Store，供导出功能使用
     try { handleBiz(data); } catch(e) {}
 
+    // 历史消息清理：移除工具调用 XML 和续跑 prompt 的废弃数据
+    // 参考 deepseek-pp/core/interceptor/fetch-hook.ts:interceptHistoryResponse
+    // 在防撤回处理之前清理，避免废弃数据干扰防撤回逻辑
+    let cleaned = false;
+    try {
+        stripToolCallsFromHistory(json);
+        cleaned = true;
+    } catch(e) {}
+
     let sessId = data.chat_session.id;
     let modified = false;
     // 防撤回：将被拦截的消息替换为本地缓存的存档内容
@@ -214,7 +227,7 @@ function onHistoryMessageResp(req, res) {
             }
         }
     }
-    if (modified) {
+    if (modified || cleaned) {
         json.data.biz_data = data;
         res = JSON.stringify(json);
     }
@@ -279,9 +292,21 @@ export function installXhrHook() {
         let [urlPath] = url.split("?");
         if (urlPath == '/api/v0/chat/history_messages') {
             this.__reqType = "history";
-        } else if (urlPath == '/api/v0/chat/completion' || urlPath == '/api/v0/chat/edit_message' || urlPath == '/api/v0/chat/regenerate' ||
-                   urlPath == '/api/v0/chat/continue' || urlPath == '/api/v0/chat/resume_stream') {
+        } else if (urlPath == '/api/v0/chat/completion') {
             this.__reqType = "generate";
+            this.__routeKey = 'completion';
+        } else if (urlPath == '/api/v0/chat/edit_message') {
+            this.__reqType = "generate";
+            this.__routeKey = 'editMessage';
+        } else if (urlPath == '/api/v0/chat/regenerate') {
+            this.__reqType = "generate";
+            this.__routeKey = 'regenerate';
+        } else if (urlPath == '/api/v0/chat/continue') {
+            this.__reqType = "generate";
+            this.__routeKey = 'continue';
+        } else if (urlPath == '/api/v0/chat/resume_stream') {
+            this.__reqType = "generate";
+            this.__routeKey = 'resumeStream';
         }
         return originXhrOpen.apply(this, arguments);
     }
@@ -294,12 +319,52 @@ export function installXhrHook() {
             try {
                 let bodyJson = JSON.parse(body);
                 this.__sessId = bodyJson.chat_session_id;
-                // 系统提示词注入：在用户 prompt 前插入系统指令
-                if (CONFIG.promptInjectEnabled && CONFIG.promptText && bodyJson.prompt) {
-                    bodyJson.prompt = '[系统指令]\n' + CONFIG.promptText + '\n[/系统指令]\n\n' + bodyJson.prompt;
-                    arguments[0] = JSON.stringify(bodyJson);
+                // 保存注入前的原始 prompt 与请求元数据，供 observeXhrStream 分发
+                const originalPrompt = typeof bodyJson.prompt === 'string' ? bodyJson.prompt : null;
+                const model = bodyJson.model || 'deepseek-chat';
+                const chatSessionId = bodyJson.chat_session_id ? String(bodyJson.chat_session_id) : null;
+
+                // prompt 注入（系统指令 + 记忆 + 能力注册 + skill）
+                // 已抽取到 utils/prompt-augmentation.js，与 fetch-hub.js 共用同一入口
+                const { newBody } = applyPromptAugmentation(body);
+                if (newBody !== null) {
+                    arguments[0] = newBody;
                 }
-            } catch(e) {}
+
+                // 记录原始用户任务给 capability-agent（供工具调用后续跑 prompt 构建）
+                // 仅记录非续跑请求（agent 消息已包含原始任务，不应覆盖）
+                if (originalPrompt && typeof window !== 'undefined' && typeof window._dsRecordOriginalTask === 'function') {
+                    try {
+                        if (!isAgentContinuationPrompt(originalPrompt)) {
+                            window._dsRecordOriginalTask(originalPrompt);
+                        }
+                    } catch (e) {
+                        console.warn('[anti-recall] recordOriginalTask failed:', e);
+                    }
+                } else if (!originalPrompt && typeof window !== 'undefined' && typeof window._dsTouchUserMessageTime === 'function') {
+                    // 无 prompt 的请求（如 regenerate / continue / resumeStream）：仅刷新时间戳，不覆盖 originalTask
+                    // 避免后续工具调用因 lastUserMessageTime 过期被 agent 门控跳过
+                    try {
+                        window._dsTouchUserMessageTime();
+                    } catch (e) {}
+                }
+
+                // 注册 XHR 流式观察，将 completion 生命周期事件分发给 fetch-hub 的处理器
+                // 必须在 originXhrSend 之前注册 readystatechange 监听器，避免遗漏早期事件
+                // 读取原始 responseText（绕过防撤回 getter），确保 token 估算基于未修改的 SSE 文本
+                const xhr = this;
+                observeXhrStream(
+                    xhr,
+                    () => originXhrResponseText.get.call(xhr),
+                    Date.now(),
+                    model,
+                    originalPrompt,
+                    this.__routeKey || 'completion',
+                    chatSessionId
+                );
+            } catch(e) {
+                console.warn('[anti-recall] XHR send hook failed:', e);
+            }
         }
         return originXhrSend.apply(this, arguments);
     }

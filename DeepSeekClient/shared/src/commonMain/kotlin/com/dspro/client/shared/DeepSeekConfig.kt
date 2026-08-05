@@ -14,6 +14,20 @@ object DeepSeekConfig {
     /** 内置增强脚本在 classpath 中的资源路径。 */
     const val SCRIPT_RESOURCE_PATH: String = "dspro.js"
 
+    /** WebView 早注入 stub 脚本在 classpath 中的资源路径。
+     *  由宿主在 onPageStarted 阶段注入，安装 fetch/XHR/redirect hook。 */
+    const val EARLY_BOOT_SCRIPT_RESOURCE_PATH: String = "dspro.early-boot.js"
+
+    /** 移动端专属脚本在 classpath 中的资源路径。
+     *  由宿主在 onPageFinished 阶段注入，针对移动端触屏/性能优化。 */
+    const val MOBILE_SCRIPT_RESOURCE_PATH: String = "dspro.mobile.js"
+
+    /** 应用当前版本号，用于更新检查比较。 */
+    const val APP_VERSION: String = "1.0.0"
+
+    /** 更新检查 URL（GitHub Releases API）；为空则跳过更新检查。 */
+    const val UPDATE_CHECK_URL: String = ""
+
     /** Desktop 窗口默认宽度（像素）。 */
     const val DESKTOP_WINDOW_WIDTH: Double = 1200.0
 

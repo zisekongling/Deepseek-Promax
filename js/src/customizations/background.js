@@ -11,7 +11,9 @@ import { applyPlaceholderStyle, initPlaceholder } from './placeholder.js';
 
 /**
  * 应用聊天背景图片与透明度
- * 通过在 body 上设置 background-image 和 --anime-card-bg-opacity 变量
+ *
+ * 使用 CSS 多层 background 实现：底层为图片，顶层为 linear-gradient 遮罩。
+ * 避免伪元素方案中 z-index 层叠问题导致遮罩不可见。
  */
 export function applyBackground() {
     const bgImage = CONFIG.bgImage || '';
@@ -19,29 +21,26 @@ export function applyBackground() {
     const oldBgStyle = document.getElementById('anime-custom-bg-style');
     if (oldBgStyle) oldBgStyle.remove();
 
-    if (!bgImage) {
+    // 聊天背景开关关闭或无图片时，清除背景
+    if (!CONFIG.bgImageEnabled || !bgImage) {
         document.body.style.backgroundImage = '';
-        document.documentElement.style.removeProperty('--anime-card-bg-opacity');
+        document.body.style.backgroundSize = '';
+        document.body.style.backgroundPosition = '';
+        document.body.style.backgroundAttachment = '';
         return;
     }
 
     const style = document.createElement('style');
     style.id = 'anime-custom-bg-style';
+    // 多层 background：底层 = 图片，顶层 = 半透明白色遮罩（通过 bgOpacity 控制透明度）
     style.textContent = `
         body {
-            background-image: url("${bgImage}") !important;
-            background-size: cover !important;
-            background-position: center !important;
-            background-attachment: fixed !important;
-        }
-        /* 半透明遮罩层：通过伪元素叠加在背景之上 */
-        body::before {
-            content: '';
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(var(--anime-card-bg-rgb, 255,255,255), ${bgOpacity});
-            z-index: -1;
-            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255,255,255,${bgOpacity}), rgba(255,255,255,${bgOpacity})),
+                url("${bgImage}") !important;
+            background-size: cover, cover !important;
+            background-position: center, center !important;
+            background-attachment: fixed, fixed !important;
         }
     `;
     document.head.appendChild(style);

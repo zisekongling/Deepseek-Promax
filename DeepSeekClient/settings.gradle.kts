@@ -26,6 +26,3 @@ include(":shared")
 
 // 包含 Android 应用模块，使用原生 WebView 容器
 include(":androidApp")
-
-// 包含桌面应用模块，使用 JavaFX WebView 容器
-include(":desktopApp")

@@ -11,14 +11,17 @@ tmp/
 # ============================================================
 output/
 
-# 根目录散落的 dspro.js（由 webpack 构建后自动复制生成，不纳入版本控制）
+# 根目录散落的脚本副本（由 build.py 自动复制生成，不纳入版本控制）
 /dspro.js
+/dspro.user.js
+/浏览器脚本.user.js
 
 # ============================================================
 # IDE 与编辑器
 # ============================================================
 .vscode/
 .idea/
+.trae/
 *.iml
 *.ipr
 *.iws
@@ -47,6 +50,15 @@ pnpm-debug.log*
 .npm
 .yarn/cache
 .yarn/install-state.gz
+
+# ============================================================
+# Electron 桌面应用（deepseek-electron/）
+# ============================================================
+deepseek-electron/node_modules/
+deepseek-electron/dist/
+deepseek-electron/dist2/
+deepseek-electron/dist3/
+deepseek-electron/userdata/
 
 # ============================================================
 # Gradle / Android / Kotlin（DeepSeekClient/）

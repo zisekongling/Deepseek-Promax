@@ -1,0 +1,48 @@
+{
+  "name": "deepseek-electron",
+  "version": "5.0.0",
+  "description": "DeepSeek 桌面客户端 - Electron 版",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --dir",
+    "build:dir": "electron-builder --win --dir",
+    "build:clean": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.dspro.deepseek",
+    "productName": "DeepSeek",
+    "asar": false,
+    "directories": {
+      "output": "dist3"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "resources/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      },
+      {
+        "from": "extension",
+        "to": "extension"
+      }
+    ],
+    "win": {
+      "target": "dir",
+      "icon": "resources/icon.png",
+      "sign": null
+    }
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "electron-chrome-extensions": "^4.9.0"
+  }
+}

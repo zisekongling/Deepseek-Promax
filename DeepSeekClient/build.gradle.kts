@@ -8,8 +8,6 @@ plugins {
     alias(libs.plugins.androidLibrary) apply false
     // Kotlin Android 插件，用于 androidApp 模块的 Kotlin 编译
     alias(libs.plugins.kotlinAndroid) apply false
-    // JavaFX Gradle 插件，用于 desktopApp 模块管理 JavaFX 依赖
-    alias(libs.plugins.javafx) apply false
     // Kotlin JVM 插件，用于 desktopApp 模块的 Kotlin 编译
     alias(libs.plugins.kotlinJvm) apply false
 }

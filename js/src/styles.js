@@ -8,6 +8,11 @@ import { CONFIG } from './config.js';
 import { utils } from './utils.js';
 import { getThemeColors } from './themes.js';
 import { getBorderThemeCSS } from './customizations/border-theme.js';
+import { getForestThemeCSS } from './customizations/forest-theme.js';
+import { getOceanThemeCSS } from './customizations/ocean-theme.js';
+import { getSunsetThemeCSS } from './customizations/sunset-theme.js';
+import { getLavenderThemeCSS } from './customizations/lavender-theme.js';
+import { getCherryThemeCSS } from './customizations/cherry-theme.js';
 
 /**
  * 通用主题增强样式（标题竖条、引用块点阵、文字颜色、侧边栏透明化等）
@@ -21,7 +26,6 @@ function getEnhancedThemeCSS(isDark) {
     return `
         /* ========== 消息宽度优化 ========== */
         :root { --message-list-max-width: 75%; }
-        .ds-markdown table { width: max-content; max-width: 70%; }
 
         /* ========== 标题左侧彩色竖条 ========== */
         .ds-markdown h1, .ds-markdown h2, .ds-markdown h3,
@@ -123,9 +127,10 @@ export function injectStyles() {
     const { fontStyle, themeStyle, narrowStyle, mermaidStyle } = ensureStyleElements();
 
     // 字体规则独立注入（只注入一次），确保 original 主题下自定义字体也生效
+    // 使用 :root, :root * 通配符覆盖所有元素，修复电脑端因 DeepSeek class 选择器优先级较高导致字体不生效的问题
     if (!fontStyle.textContent) {
         fontStyle.textContent = `
-            body, div, p, span, input, textarea, button, select {
+            :root, :root * {
                 font-family: var(--anime-custom-font, 'Inter', 'PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',sans-serif) !important;
             }
         `;
@@ -268,9 +273,17 @@ export function injectStyles() {
             if (themeName !== 'original') {
                 themeStyle.textContent += getEnhancedThemeCSS(isDark);
             }
-            // Border 主题额外追加专属 CSS（渐变背景、--dsw-alias-* 变量覆盖）
-            if (themeName === 'border') {
-                themeStyle.textContent += getBorderThemeCSS(isDark);
+            // 各主题追加专属 CSS（渐变背景、--dsw-alias-* 变量覆盖）
+            const themeCSSMap = {
+                border: getBorderThemeCSS,
+                forest: getForestThemeCSS,
+                ocean: getOceanThemeCSS,
+                sunset: getSunsetThemeCSS,
+                lavender: getLavenderThemeCSS,
+                cherry: getCherryThemeCSS
+            };
+            if (themeCSSMap[themeName]) {
+                themeStyle.textContent += themeCSSMap[themeName](isDark);
             }
         }
     }

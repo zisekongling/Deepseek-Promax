@@ -2,14 +2,8 @@
 [versions]
 kotlin = "2.0.21"
 agp = "8.7.0"
-javafxPlugin = "0.1.0"
-javafx = "21.0.5"
 
 [libraries]
-# JavaFX 模块依赖，用于 desktopApp 的 WebView 渲染
-javafx-web = { module = "org.openjfx:javafx-web", version.ref = "javafx" }
-javafx-controls = { module = "org.openjfx:javafx-controls", version.ref = "javafx" }
-javafx-graphics = { module = "org.openjfx:javafx-graphics", version.ref = "javafx" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
@@ -17,4 +11,3 @@ kotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 androidApplication = { id = "com.android.application", version.ref = "agp" }
 androidLibrary = { id = "com.android.library", version.ref = "agp" }
-javafx = { id = "org.openjfx.javafxplugin", version.ref = "javafxPlugin" }

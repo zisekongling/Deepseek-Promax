@@ -3,6 +3,7 @@ package com.dspro.client.android
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -93,6 +94,9 @@ class MainActivity : Activity() {
 
             // 注入 JS 桥接对象，用于网页输入框内容变化时回调原生更新预览栏
             addJavascriptInterface(IMEBridge(), "AndroidIME")
+            // 注入原生能力桥接对象 window.AndroidBridge，供 dspro.js 的 platform/bridge.js
+            // 调用 Toast/震动/剪贴板/分享/文件/HTTP/通知/更新/全屏 等原生能力
+            addJavascriptInterface(DsBridge(this@MainActivity, this), "AndroidBridge")
         }
 
         // 用 FrameLayout 作为根容器，WebView 填满，预览浮层叠加其上
@@ -242,7 +246,8 @@ class MainActivity : Activity() {
     /**
      * 自定义 WebViewClient：
      * - 限制仅 deepseek.com 域内跳转在 WebView 内完成
-     * - 页面加载完成后注入 dspro.js
+     * - 页面开始加载时（onPageStarted）提前注入 early-boot stub，安装 fetch/XHR/redirect hook
+     * - 页面加载完成后（onPageFinished）注入主脚本 dspro.js
      */
     private inner class DeepSeekWebViewClient : WebViewClient() {
 
@@ -255,10 +260,22 @@ class MainActivity : Activity() {
             return !host.endsWith("deepseek.com")
         }
 
+        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            // 提前注入 early-boot stub：在页面业务脚本加载前安装 fetch/XHR/redirect hook，
+            // 确保 Agent 请求拦截、防撤回、跳转等 document-start 类功能在 WebView 环境下生效。
+            // early-boot 内部通过 window.__dsEarlyBootDone 保证幂等，刷新时不会重复安装。
+            val earlyBoot: String = ScriptLoader.loadEarlyBootScript()
+            if (earlyBoot.isNotEmpty()) {
+                view?.evaluateJavascript(earlyBoot, null)
+            }
+        }
+
         override fun onPageFinished(view: WebView, url: String) {
             super.onPageFinished(view, url)
-            // 注入内置增强脚本；读取失败时跳过
-            val script: String = ScriptLoader.loadScript()
+            // 注入移动端专属脚本；读取失败时回退到通用 dspro.js
+            // 移动端脚本会检测 __dsEarlyBootDone 跳过 hook 重复安装
+            val script: String = ScriptLoader.loadMobileScript()
             if (script.isNotEmpty()) {
                 view.evaluateJavascript(script, null)
             }
