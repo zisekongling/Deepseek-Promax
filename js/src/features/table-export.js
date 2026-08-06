@@ -6,7 +6,10 @@
  *   2. 表格主题适配（自动透明叠加 / 双模式浅色/深色）
  *   3. 表格列宽策略（均分 / 自适应 / 均分+最小宽度保护）
  *   4. 流式输出稳定检测（指纹追踪，防闪烁）
- *   5. 宽屏模式下的表格宽度约束（修复宽屏下表格溢出问题）
+ *   5. 表格滑动包裹：表格超过屏幕宽度时自动包裹为可滑动容器
+ *      - 支持触摸滑动（移动端）
+ *      - 支持鼠标拖拽滑动（桌面端）
+ *      - 左右渐变阴影指示器
  *
  * 适配自 dass.js 的表格优化逻辑
  */
@@ -79,18 +82,23 @@ function calcColumnWeights(table, colCount) {
  */
 function applyTableStyles(table) {
     const tableWidthMode = CONFIG.tableWidthMode || 'equal';
+    const scrollEnabled = CONFIG.tableScrollEnabled !== false; // 默认开启
 
-    // maxWidth 约束：所有模式统一，表格宽度不得超过容器
+    // maxWidth 约束
     const vc = document.querySelector('.ds-virtual-list-visible-items');
     let maxW;
     if (vc) {
         maxW = vc.clientWidth + 'px';
-        table.style.maxWidth = maxW;
+        if (!scrollEnabled) {
+            table.style.maxWidth = maxW;
+        }
         vc.style.overflowX = 'visible';
         vc.style.maxWidth = '100%';
     } else {
         maxW = '100%';
-        table.style.maxWidth = maxW;
+        if (!scrollEnabled) {
+            table.style.maxWidth = maxW;
+        }
     }
 
     // 列宽策略
@@ -164,11 +172,176 @@ function applyTableStyles(table) {
         if (!scrollArea.dataset.dsOrigOverflowX) {
             scrollArea.dataset.dsOrigOverflowX = scrollArea.style.overflowX || '';
         }
-        scrollArea.style.overflowX = 'visible';
+        // 滑动模式下让容器允许溢出，由滑动包裹层处理滚动
+        scrollArea.style.overflowX = scrollEnabled ? 'auto' : 'visible';
     }
 
     // 所有处理完成，显示表格
     table.style.opacity = '1';
+}
+
+// ============================================================
+// 表格滑动包裹模块
+// ============================================================
+
+/** 已包裹表格的 WeakSet，避免重复包裹 */
+const _wrappedTables = new WeakSet();
+
+/** 滚动阴影指示器 CSS class */
+const SCROLL_WRAPPER_CLASS = 'ds-table-scroll-wrapper';
+const SCROLL_SHADOW_LEFT = 'ds-table-scroll-shadow-left';
+const SCROLL_SHADOW_RIGHT = 'ds-table-scroll-shadow-right';
+
+/**
+ * 更新滚动容器的左右阴影指示器
+ * 当可向左滚动时显示左侧阴影，可向右滚动时显示右侧阴影
+ * @param {HTMLElement} wrapper - 滚动包裹容器
+ */
+function updateScrollShadows(wrapper) {
+    const sl = wrapper.scrollLeft;
+    const maxSl = wrapper.scrollWidth - wrapper.clientWidth;
+    const threshold = 2; // 2px 容差避免浮点误差
+
+    if (sl <= threshold) {
+        wrapper.classList.remove(SCROLL_SHADOW_LEFT);
+    } else {
+        wrapper.classList.add(SCROLL_SHADOW_LEFT);
+    }
+
+    if (maxSl - sl <= threshold) {
+        wrapper.classList.remove(SCROLL_SHADOW_RIGHT);
+    } else {
+        wrapper.classList.add(SCROLL_SHADOW_RIGHT);
+    }
+}
+
+/**
+ * 为滚动包裹容器绑定触摸/拖拽滑动事件
+ * 支持移动端触摸滑动和桌面端鼠标拖拽
+ * @param {HTMLElement} wrapper - 滚动包裹容器
+ */
+function bindScrollEvents(wrapper) {
+    let isDragging = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    let moved = false;
+
+    /** 开始拖拽 */
+    function onStart(e) {
+        // 只处理单指触摸或主鼠标按键
+        if (e.type === 'touchstart' && e.touches.length !== 1) return;
+        if (e.type === 'mousedown' && e.button !== 0) return;
+
+        isDragging = true;
+        moved = false;
+        const point = e.touches ? e.touches[0] : e;
+        startX = point.clientX;
+        startScrollLeft = wrapper.scrollLeft;
+        wrapper.style.cursor = 'grabbing';
+        wrapper.style.userSelect = 'none';
+    }
+
+    /** 拖拽移动 */
+    function onMove(e) {
+        if (!isDragging) return;
+        const point = e.touches ? e.touches[0] : e;
+        const dx = point.clientX - startX;
+        if (Math.abs(dx) > 3) moved = true;
+        wrapper.scrollLeft = startScrollLeft - dx;
+        updateScrollShadows(wrapper);
+    }
+
+    /** 结束拖拽 */
+    function onEnd() {
+        if (!isDragging) return;
+        isDragging = false;
+        wrapper.style.cursor = '';
+        wrapper.style.userSelect = '';
+
+        // 如果只是点击（没有拖动），不做额外处理
+        if (!moved) {
+            wrapper.style.cursor = '';
+        }
+    }
+
+    wrapper.addEventListener('mousedown', onStart, { passive: false });
+    wrapper.addEventListener('touchstart', onStart, { passive: true });
+    document.addEventListener('mousemove', onMove, { passive: false });
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
+
+    // 原生滚动时同步更新阴影
+    wrapper.addEventListener('scroll', () => updateScrollShadows(wrapper), { passive: true });
+
+    // 保存清理函数引用，用于后续可能的卸载
+    wrapper._dsScrollCleanup = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('mouseup', onEnd);
+        document.removeEventListener('touchend', onEnd);
+        document.removeEventListener('touchcancel', onEnd);
+    };
+}
+
+/**
+ * 将表格包裹在可滑动的容器中
+ * 当表格自然宽度超过容器宽度时启用水平滚动
+ * @param {Element} table - 表格元素
+ */
+function wrapTableForScroll(table) {
+    if (_wrappedTables.has(table)) return;
+    _wrappedTables.add(table);
+
+    const parent = table.parentElement;
+    if (!parent) return;
+
+    // 如果表格已经被包裹过，跳过
+    if (parent.classList.contains(SCROLL_WRAPPER_CLASS)) return;
+
+    // 创建滚动包裹容器
+    const wrapper = document.createElement('div');
+    wrapper.className = SCROLL_WRAPPER_CLASS;
+
+    // 将表格插入包裹容器
+    parent.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+
+    // 绑定滑动事件
+    bindScrollEvents(wrapper);
+
+    // 使用 ResizeObserver 检测表格宽度变化，更新阴影
+    if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => {
+            updateScrollShadows(wrapper);
+        });
+        ro.observe(wrapper);
+        ro.observe(table);
+        wrapper._dsResizeObserver = ro;
+    }
+
+    // 初始阴影检测
+    requestAnimationFrame(() => updateScrollShadows(wrapper));
+}
+
+/**
+ * 为所有表格应用滑动包裹
+ * 检测表格是否溢出容器，仅对溢出的表格启用滑动
+ */
+function applyScrollWrapping() {
+    document.querySelectorAll('.ds-markdown').forEach(container => {
+        container.querySelectorAll('table').forEach(table => {
+            // 检查表格是否超出容器宽度
+            const containerWidth = container.clientWidth;
+            const tableWidth = table.scrollWidth;
+
+            // 如果表格宽度超过容器宽度，启用滑动包裹
+            if (tableWidth > containerWidth + 10) { // 10px 容差
+                wrapTableForScroll(table);
+            }
+        });
+    });
 }
 
 // ============================================================
@@ -414,7 +587,7 @@ function processAllTables() {
     const now = Date.now();
 
     document.querySelectorAll('.ds-markdown').forEach(container => {
-        container.style.overflowX = 'visible';
+        container.style.overflowX = CONFIG.tableScrollEnabled !== false ? 'auto' : 'visible';
         container.style.maxWidth = '100%';
         container.querySelectorAll('table').forEach(table => {
             const fp = getTableFingerprint(table);
@@ -459,6 +632,11 @@ function processAllTables() {
 
     if (anyUnstable) {
         scheduleTableProcess();
+    }
+
+    // 滑动包裹：检测溢出表格并包裹
+    if (CONFIG.tableScrollEnabled !== false) {
+        applyScrollWrapping();
     }
 }
 
@@ -506,6 +684,9 @@ export function applyTableThemeClass(mode) {
  */
 export function reapplyAllTableStyles() {
     document.querySelectorAll('.ds-markdown table').forEach(t => applyTableStyles(t));
+    if (CONFIG.tableScrollEnabled !== false) {
+        applyScrollWrapping();
+    }
 }
 
 // ============================================================
@@ -609,6 +790,86 @@ html.ds-table-dual body.dark .ds-markdown tbody tr:hover {
     background-color: rgba(79,70,229,0.1) !important;
 }
 
+/* 表格滑动包裹容器 */
+.ds-table-scroll-wrapper {
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    position: relative;
+    cursor: grab;
+    max-width: 100%;
+    border-radius: 12px;
+    /* 滚动条美化 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(128,128,128,0.2) transparent;
+}
+.ds-table-scroll-wrapper:active {
+    cursor: grabbing;
+}
+.ds-table-scroll-wrapper::-webkit-scrollbar {
+    height: 6px;
+}
+.ds-table-scroll-wrapper::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+}
+.ds-table-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(128,128,128,0.2);
+    border-radius: 3px;
+}
+.ds-table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: rgba(128,128,128,0.35);
+}
+
+/* 深色模式滚动条 */
+html.ds-table-dual body.dark .ds-table-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.15);
+}
+html.ds-table-dual body.dark .ds-table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.25);
+}
+
+/* 滚动阴影指示器 — 左右渐变遮罩 */
+.ds-table-scroll-wrapper::before,
+.ds-table-scroll-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 32px;
+    z-index: 5;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    opacity: 0;
+}
+.ds-table-scroll-wrapper::before {
+    left: 0;
+    border-radius: 12px 0 0 12px;
+    background: linear-gradient(to right, rgba(128,128,128,0.08), transparent);
+}
+.ds-table-scroll-wrapper::after {
+    right: 0;
+    border-radius: 0 12px 12px 0;
+    background: linear-gradient(to left, rgba(128,128,128,0.08), transparent);
+}
+/* 左侧阴影 */
+.ds-table-scroll-wrapper.ds-table-scroll-shadow-left::before {
+    opacity: 1;
+}
+/* 右侧阴影 */
+.ds-table-scroll-wrapper.ds-table-scroll-shadow-right::after {
+    opacity: 1;
+}
+
+/* 深色模式阴影 */
+html.ds-table-dual body.dark .ds-table-scroll-wrapper::before {
+    background: linear-gradient(to right, rgba(255,255,255,0.06), transparent);
+}
+html.ds-table-dual body.dark .ds-table-scroll-wrapper::after {
+    background: linear-gradient(to left, rgba(255,255,255,0.06), transparent);
+}
+
 /* 导出按钮 — 公共布局 */
 .ds-table-internal-buttons {
     position: absolute; bottom: 12px; right: 12px;
@@ -699,6 +960,11 @@ export function initTableExport() {
     // resize 节流处理表格
     window.addEventListener('resize', () => {
         clearTimeout(window._dsTableResizeFix);
-        window._dsTableResizeFix = setTimeout(processAllTables, 100);
+        window._dsTableResizeFix = setTimeout(() => {
+            processAllTables();
+            if (CONFIG.tableScrollEnabled !== false) {
+                applyScrollWrapping();
+            }
+        }, 100);
     });
 }

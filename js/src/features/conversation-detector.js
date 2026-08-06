@@ -54,13 +54,38 @@ export function buildConversationUrl(conversationId) {
 }
 
 /**
+ * 从自定义专家模式指示器中提取会话名称
+ * 结构：._9fcbeda._7ee190f > .afa34042.e0a1edb7.e37a04e4._5a50d80
+ * 常见名称示例："星璃问候主人"、"晚上问候"、"消息未打完请补充"
+ * @returns {string|null} 自定义名称，未找到返回 null
+ */
+function getCustomConversationName() {
+    try {
+        const nameEl = document.querySelector('._9fcbeda._7ee190f .afa34042.e0a1edb7.e37a04e4._5a50d80');
+        if (nameEl && nameEl.textContent) {
+            return nameEl.textContent.trim();
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
  * 检测当前活跃会话
+ * 优先使用自定义专家模式指示器中的名称，检测失败才回退到 document.title
  * @returns {{id:string, title:string, url:string}|null}
  */
 export function getActiveConversation() {
     const id = getConversationIdFromPath();
     if (!id) return null;
-    const title = (document.title || '').replace(/\s*-\s*DeepSeek\s*$/i, '').trim() || '未命名对话';
+
+    // 优先检测自定义名称（如"星璃问候主人"），失败回退到 document.title
+    const customName = getCustomConversationName();
+    const title = customName
+        || (document.title || '').replace(/\s*-\s*DeepSeek\s*$/i, '').trim()
+        || '未命名对话';
+
     return { id, title, url: buildConversationUrl(id) };
 }
 

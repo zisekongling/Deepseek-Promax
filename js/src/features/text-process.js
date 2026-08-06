@@ -198,20 +198,44 @@ function renderImages(textNode) {
 }
 
 /**
- * 清理文本节点中的系统注入标记（系统指令 + 系统记忆 + 能力说明）
+ * 清理文本节点中的系统注入标记
  * 直接修改 textContent，不改变 DOM 结构，避免 React removeChild 错误
+ *
+ * 这些标记由 prompt-augmentation.js 在请求发出前注入到 prompt 中，
+ * 刷新页面后 DeepSeek 会将其作为历史消息渲染，需要在此处清理。
+ *
+ * 清理内容：
+ *   - [系统指令]...[/系统指令] / [系统记忆]...[/系统记忆] / [能力]...[/能力]
+ *   - [当前时间]...[/当前时间] / [上传文件]...[/上传文件] / [技能指令]...[/技能指令]
+ *   - <!--ds-prompt-metadata ...--> / <!--ds-visible-user-prompt-start--> / <!--ds-visible-user-prompt-end-->
+ *
  * @param {Text} textNode
  */
 function cleanPromptInjection(textNode) {
     const text = textNode.textContent;
     if (!text) return;
-    // 检测 [系统指令] / [系统记忆] / [能力] 任一标记
-    if (!text.includes('[系统指令]') && !text.includes('[系统记忆]') && !text.includes('[能力]')) return;
-    // 移除 [系统指令]...[/系统指令]、[系统记忆]...[/系统记忆]、[能力]...[/能力] 标记及后面的空白
+    // 检测所有系统注入标记
+    if (!text.includes('[系统指令]') &&
+        !text.includes('[系统记忆]') &&
+        !text.includes('[能力]') &&
+        !text.includes('[当前时间]') &&
+        !text.includes('[上传文件]') &&
+        !text.includes('[技能指令]') &&
+        !text.includes('ds-prompt-metadata') &&
+        !text.includes('ds-visible-user-prompt')) return;
+    // 移除所有系统注入标记及后面的空白
     const cleaned = text
+        // [xx]...[/xx] 格式标签
         .replace(/\[系统指令\][\s\S]*?\[\/系统指令\]\s*/g, '')
         .replace(/\[系统记忆\][\s\S]*?\[\/系统记忆\]\s*/g, '')
-        .replace(/\[能力\][\s\S]*?\[\/能力\]\s*/g, '');
+        .replace(/\[能力\][\s\S]*?\[\/能力\]\s*/g, '')
+        .replace(/\[当前时间\][\s\S]*?\[\/当前时间\]\s*/g, '')
+        .replace(/\[上传文件\][\s\S]*?\[\/上传文件\]\s*/g, '')
+        .replace(/\[技能指令\][\s\S]*?\[\/技能指令\]\s*/g, '')
+        // HTML 注释格式可见性标记（prompt-visibility.js 注入）
+        .replace(/<!--ds-prompt-metadata\s[^>]*-->\s*/g, '')
+        .replace(/<!--ds-visible-user-prompt-start-->\s*/g, '')
+        .replace(/<!--ds-visible-user-prompt-end-->\s*/g, '');
     if (cleaned !== text) {
         textNode.textContent = cleaned;
     }

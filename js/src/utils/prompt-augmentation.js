@@ -69,6 +69,22 @@ function callMemoryInjector(originalPrompt) {
     }
 }
 
+/**
+ * 安全调用文件上传注入器
+ * @returns {string} 上传文件信息文本，失败返回空串
+ */
+function callFileUploadInjector() {
+    const cfg = getConfig();
+    if (!cfg.fileUploadEnabled) return '';
+    if (typeof window === 'undefined' || typeof window._dsFileUploadInjector !== 'function') return '';
+    try {
+        return window._dsFileUploadInjector() || '';
+    } catch (e) {
+        console.warn('[prompt-augmentation] fileUploadInjector failed:', e);
+        return '';
+    }
+}
+
 // ============================================================
 // Skill 注入
 // ============================================================
@@ -208,8 +224,11 @@ function getTimeInjection() {
 export function buildPromptPrefix(originalPrompt) {
     if (typeof originalPrompt !== 'string' || !originalPrompt) return '';
 
-    // Electron 桌面端：DeepSeek++ 扩展负责提示词注入，JS 脚本跳过以避免重复
-    if (IS_ELECTRON) return '';
+    // 不再使用 blanket IS_ELECTRON 阻断：
+    //   - ELECTRON_DISABLED_KEYS 中的功能（agent系统/记忆/工具/webTools/MCP/skill/preset等）
+    //     已由 loadConfig() 强制设为 false，各注入器内部的 cfg.xxxEnabled 检查足以阻止注入
+    //   - 不在 ELECTRON_DISABLED_KEYS 中的功能（时间注入/文件上传等）应正常工作
+    //   - 移除 blanket 阻断可确保非重叠功能在 Electron 桌面端正常可用
 
     const cfg = getConfig();
     const isAgentMessage = isAgentContinuationPrompt(originalPrompt);
@@ -245,6 +264,10 @@ export function buildPromptPrefix(originalPrompt) {
 
         // 4. 能力注册注入：教会 DeepSeek 如何调用工具
         prefix += callCapabilityInjector();
+
+        // 4.5 文件上传注入（[上传文件]...[/上传文件]）：放在能力注册之后，
+        //     更靠近用户提示词，让 AI 优先关注文件内容
+        prefix += callFileUploadInjector();
 
         // 5. 若 skill 命中，把 skill instructions 作为额外前缀注入
         //    （不替换 originalPrompt，而是 prepend，保留用户原始输入作为上下文）

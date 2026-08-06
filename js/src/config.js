@@ -210,6 +210,7 @@ export const DEFAULTS = {
     pythonSandboxEnabled: false,  // Python 沙箱开关
     magicWandEnabled: true,         // 魔法棒：侧边栏控制面板 + 悬浮图标 + 点击切换 UI 效果
     timeInjectEnabled: true,        // 时间注入：在每次对话中注入当前日期时间，让 AI 感知时间
+    fileUploadEnabled: false,       // 文件上传：专家模式下上传文件，注入文件名和内容到 prompt
 
     // === 代码块折叠 ===
     codeFoldEnabled: true,          // 代码块折叠总开关
@@ -220,6 +221,7 @@ export const DEFAULTS = {
     tableExportEnabled: true,       // 表格导出总开关（悬停PNG/CSV按钮）
     tableThemeMode: 'auto',         // 表格主题：auto(透明叠加) | dual(双模式浅色/深色)
     tableWidthMode: 'equal',        // 表格列宽策略：equal(均分) | auto(自适应) | equal-minwidth(均分+最小宽度保护)
+    tableScrollEnabled: true,       // 表格滑动包裹：表格超过屏幕宽度时启用触摸滑动
 
     // === AI思考过程自动折叠 ===
     thinkFoldEnabled: true,         // 自动折叠思考区域总开关
@@ -295,7 +297,9 @@ export const OPTION_CONFIG_KEYS = {
     magicWand: 'magicWandEnabled',
     codeFold: 'codeFoldEnabled',
     tableExport: 'tableExportEnabled',
-    thinkFold: 'thinkFoldEnabled'
+    tableScroll: 'tableScrollEnabled',
+    thinkFold: 'thinkFoldEnabled',
+    fileUpload: 'fileUploadEnabled'
 };
 
 // ============================================================

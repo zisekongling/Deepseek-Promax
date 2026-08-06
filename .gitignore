@@ -51,6 +51,10 @@ pnpm-debug.log*
 .yarn/cache
 .yarn/install-state.gz
 
+# webpack 构建产物
+js/dist/
+js/.cache/
+
 # ============================================================
 # Electron 桌面应用（deepseek-electron/）
 # ============================================================

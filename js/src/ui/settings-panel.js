@@ -1145,6 +1145,7 @@ function buildEnhanceTab() {
 
             <div class="ds-section" style="margin-top:12px;">${tt('settings.section.dialogContext', '对话上下文')}</div>
             ${toggleRow('timeInject', '🕐 时间注入')}
+            ${toggleRow('fileUpload', '📎 文件上传（专家模式）')}
 
             <div class="ds-section">${tt('settings.section.quickActions', '快捷操作')}</div>
             ${toggleRow('inlineExport', '📤 消息内联导出')}

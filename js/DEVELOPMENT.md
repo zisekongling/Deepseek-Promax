@@ -112,37 +112,84 @@ DeepSeek 使用 CSS Modules，类名是构建时生成的 hash（如 `d29f3d7d`�
 
 桌面端用 Esc 键 + mousedown 双重机制关闭下拉菜单，**不要**用 `body.click()`（会触发 toggle 状态反转）。
 
-## 三、Agent 系统开发规范
+## 三、Agent 系统开发规范（v2.0）
 
-### 3.1 工具注册
+### 3.1 架构总览
+
+Agent 系统 v2.0 采用三层分离架构，通过 `agent/index.js` 统一入口初始化：
+
+```
+agent/index.js（统一入口）
+├── core/             核心引擎
+│   ├── tool-registry.js  工具注册中心（单一数据源）
+│   ├── harness.js        约束/验证/纠正框架
+│   ├── context.js        上下文管理（提示词构建）
+│   └── engine.js         ReAct 循环引擎
+├── tools/            工具集（五类）
+│   ├── memory-tools.js      记忆操作（Execution）
+│   ├── control-tools.js     控制流（Control）
+│   ├── collaboration-tools.js 协作（Collaboration）
+│   ├── perception-tools.js  感知（Perception）
+│   └── execution-tools.js   执行（Execution）
+└── guards/           护栏层
+    ├── tool-guard.js   工具护栏
+    ├── input-guard.js  输入护栏
+    └── output-guard.js 输出护栏
+```
+
+**初始化入口**：`initAgentSystem()` 替代原来的 `initCapabilityRegister()` + `initCapabilityAgent()`。
+
+### 3.2 工具注册
 
 **新增工具必须遵守**：
 
-1. 在 [capability-register.js](./src/features/capability-register.js) 的 `_registerBuiltinTools` 或 `_registerDynamicTools` 中注册
-2. 注册时指定：
-   - `name`：工具名（snake_case）
-   - `label`：中文显示名
-   - `description`：工具说明（给 AI 看）
-   - `parameters`：参数 schema
-   - `executor`：执行函数 `(payload) => { ok, summary, detail }` 或 `{ ok, summary, detail, pending }`
+1. 在对应的 `agent/tools/*.js` 中添加工具描述符和执行器
+2. 工具描述符格式：
+   ```js
+   {
+     name: 'tool_name',           // snake_case
+     description: '工具用途说明',  // 给 AI 看
+     category: 'execution',       // perception/execution/collaboration/control/event
+     riskLevel: 'low',            // low/medium/high
+     isReadOnly: false,           // 是否只读（可并行调用）
+     inputSchema: { type: 'object', properties: {...} },
+     boundaryNote: '做不到什么',   // 边界说明
+     examples: ['{"key":"value"}'] // 调用示例
+   }
+   ```
+3. 执行器格式：`(payload) => { ok, summary, detail }` 或 `{ ok, summary, detail, skipped, pending }`
+4. 在 `agent/index.js` 的 `_registerAllBuiltinTools()` 中添加对应的注册组
+5. 注册时指定：
    - `requireAgentFeedback`：是否触发续跑（默认 true）
-3. 工具名加入 `TOOL_NAMES` 数组（通过 `registry.register` 自动同步）
-4. **NO_FEEDBACK 集合**：纯查询类工具（如 `memory_recall`）加入 `NO_FEEDBACK` 不触发续跑
-5. 在 prompt 的第二层（`getToolSchemasPrompt`）会自动渲染，无需手动写提示词
+   - `category`：工具分类
+   - `riskLevel`：风险等级
+   - `isReadOnly`：是否只读
 
-**执行器返回值规范**：
+**执行器返回值规范**：同旧版，保持不变。
 
-```js
-{
-  ok: boolean,          // 成功/失败
-  summary: string,      // 一句话摘要（给 AI 看的续跑 prompt 用）
-  detail: string,       // 详细信息（给 AI 看的续跑 prompt 用）
-  skipped?: boolean,    // 跳过（如去重命中），skipped 而非 failure，避免 AI 误判重试
-  pending?: boolean     // 等待中（如 ask_user），Agent 循环会等待 Promise
-}
+### 3.3 护栏层
+
+工具执行自动经过三层护栏：
+
+```
+executeToolCall(name, payload)
+  ├── preToolCallGuard()    执行前约束检查
+  │   ├── 工具是否已注册
+  │   ├── Agent 系统是否启用
+  │   └── 风险等级是否需要确认
+  ├── registry.execute()    执行工具
+  └── postToolCallGuard()   执行后验证纠正
+      ├── 格式校验（ok 字段）
+      ├── 连续失败模式检测
+      └── correctToolCall() 失败纠正（retry/skip/abort/fallback）
 ```
 
-### 3.2 续跑 prompt 构造
+**新增护栏模块**：
+- `guards/tool-guard.js`：工具执行前后检查
+- `guards/input-guard.js`：输入验证 + 注入检测
+- `guards/output-guard.js`：回复验证 + 任务完成审查
+
+### 3.4 续跑 prompt 构造
 
 **必须使用 v2 边界标记**：
 
@@ -165,7 +212,7 @@ __DS_AGENT_V2_END__
 
 **originalTask 长度限制**：超过 8000 字符用 `clampText` 截断并标注 `...[truncated]`。
 
-### 3.3 工具调用 XML 格式
+### 3.5 工具调用 XML 格式
 
 AI 输出的工具调用必须是：
 
@@ -183,7 +230,7 @@ AI 输出的工具调用必须是：
 
 **解析容错**（`_lenientParseJSON`）：流式截断时尝试 6 步修复（移除 markdown 包装 → 移除注释 → 压缩字符串外空白 → 单引号转双引号 → 移除尾逗号 → 括号深度补全）。但**不要**因此放松对 AI 的格式要求。
 
-### 3.4 工具调用 UI 渲染
+### 3.6 工具调用 UI 渲染
 
 | 工具 | 渲染方式 |
 |------|----------|
@@ -197,7 +244,7 @@ AI 输出的工具调用必须是：
 - **删除的 memory 不重新记录**：`memory_save` 时双路检查 `isMemoryDeleted(id, title, content)`
 - **XML 元素必须隐藏**：用户不可见工具调用 XML，清理后段落无可见文本则 `style.display = 'none'`
 
-### 3.5 Agent 循环控制
+### 3.7 Agent 循环控制
 
 | 工具 | 调用时机 | 禁止时机 |
 |------|----------|----------|
@@ -215,7 +262,7 @@ AI 输出的工具调用必须是：
 
 **用户停止**：`userStopRequested` 标志贯穿循环，每次关键节点检查；`stopAgent`（AI 主动）与用户停止的区别在于是否清空队列。
 
-### 3.6 Todo 清单校验规则
+### 3.8 Todo 清单校验规则
 
 `todo_write` 必须通过 6 项校验：
 
@@ -230,7 +277,7 @@ AI 输出的工具调用必须是：
 
 **todo_write 必须传完整列表**（全量替换，非增量）。content 写成可验证完成条件（错误："扫描文件"；正确："确认项目中不存在不符合 snake_case 的文件"）。
 
-### 3.7 ask_user 规范
+### 3.9 ask_user 规范
 
 - 每次最多 4 个问题
 - 每个问题 2-4 个选项
@@ -239,7 +286,7 @@ AI 输出的工具调用必须是：
 - `ask_user` 必须放在回复末尾
 - 用户答案通过 `<user_answers>` 块注入续跑 prompt
 
-### 3.8 工具调用段落扫描
+### 3.10 工具调用段落扫描
 
 `scanToolCallElements` 处理流程：
 
@@ -445,7 +492,7 @@ webpack 导出三个 config（篡改猴版 / WebView 主脚本 / early-boot stub
 ```js
 try { initMemory(); } catch (e) {}
 try { initTodoManager(); } catch (e) {}
-try { initCapabilityRegister(); } catch (e) {}
+try { initAgentSystem(); } catch (e) {}
 ```
 
 ### 9.2 工具调用执行器
@@ -544,7 +591,8 @@ try { initCapabilityRegister(); } catch (e) {}
 | 多个 MutationObserver 重复扫描 | 用 observer-hub 统一注册 |
 | 多次 fetch/XHR hook 递归 | 用 `installed` 标志防重入 |
 | 配置快照过期 | 用 `window.__dsConfig` 动态读取 |
-| capability-register 顶层 await 导致 TOOL_NAMES 为空 | 顶层同步注册 22 个内置工具 |
+| 新增工具未注册到 registry | 在 `agent/index.js` 的 `_registerAllBuiltinTools()` 中添加 |
+| 工具执行跳过了护栏 | 用 `agent/index.js` 的 `executeToolCall()` 而非直接调 registry |
 | 续跑 prompt 重复注入记忆 | 续跑消息只注入 `[能力]`，不注入记忆/系统指令 |
 | 工具调用 toast 干扰用户 | 只显示卡片，不弹 toast |
 | 长循环漂移 | 20 轮上限 + regroundLoop 重新锚定（loop-engine） |
@@ -565,6 +613,7 @@ try { initCapabilityRegister(); } catch (e) {}
 - `window.DSEnhance.showSettings()`：显示设置面板
 - `window.__dsConfig`：直接读取配置对象
 - `window._dsToolNames`：查看当前注册的工具名列表
+- `window._dsAgentSystemReady`：检查 Agent 系统是否已初始化
 - `window._dsGetOriginalTask()`：查看当前 Agent 原始任务
 
 ### 14.3 构建验证

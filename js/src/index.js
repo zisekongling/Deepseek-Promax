@@ -50,8 +50,8 @@ import { initInlineExport } from './features/inline-export.js';
 import { initHistoryTags } from './features/history-tags.js';
 import { initContextMenu } from './features/context-menu.js';
 import { initMemory } from './features/memory.js';
-import { initCapabilityRegister } from './features/capability-register.js';
-import { initCapabilityAgent } from './features/capability-agent.js';
+// Agent 系统（统一入口，替代 capability-register + capability-agent）
+import { initAgentSystem } from './agent/index.js';
 import { initTodoManager } from './features/todo.js';
 import { initAskUserManager } from './features/ask-user.js';
 // === Phase 6 新增模块导入 ===
@@ -76,6 +76,8 @@ import { initSync } from './features/sync/index.js';
 import { initAutomation } from './features/automation/index.js';
 // 多模态分析
 import { initMultimodal } from './features/multimodal/index.js';
+// 专家模式文件上传
+import { initFileUpload } from './features/file-upload.js';
 // Python 沙箱
 import { initSandbox } from './features/sandbox/index.js';
 // 页面缩略控制
@@ -220,8 +222,7 @@ async function init() {
             try { initMemory(); } catch (e) {}
             try { initTodoManager(); } catch (e) {}
             try { initAskUserManager(); } catch (e) {}
-            try { initCapabilityRegister(); } catch (e) {}
-            try { initCapabilityAgent(); } catch (e) {}
+            try { initAgentSystem(); } catch (e) {}
         }
         if (CONFIG.loopEngineEnabled || CONFIG.loopCrashRecoveryEnabled) {
             try { initLoopEngine(); } catch (e) {}
@@ -258,6 +259,8 @@ async function init() {
         try { initAutomation(); } catch (e) {}
         // 10. 多模态分析
         try { initMultimodal(); } catch (e) {}
+        // 10.5. 专家模式文件上传
+        try { initFileUpload(); } catch (e) {}
         // 11. Python 沙箱
         try { initSandbox(); } catch (e) {}
         // 12. 页面缩略控制
